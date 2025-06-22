@@ -400,7 +400,7 @@ func generateProxmoxDisks(disks []diskConfig, isos []ISOsConfig, cloneSourceDisk
 					}
 					deviceIndex := fmt.Sprintf("scsi%s", isos[idx].Index)
 					log.Printf("Mapping static assigned ISO to %s", deviceIndex)
-					if slices.Contains(cloneSourceDisks, fmt.Sprintf("scsi%d", isos[idx].Index)) {
+					if slices.Contains(cloneSourceDisks, fmt.Sprintf("scsi%s", isos[idx].Index)) {
 						warnings = append(warnings, fmt.Sprintf("an existing hard disk was found at %s on the clone source VM, overwriting with ISO configured for the same address", deviceIndex))
 					}
 					reflect.
