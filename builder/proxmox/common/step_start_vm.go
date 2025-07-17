@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"reflect"
 	"slices"
 	"strconv"
@@ -144,7 +145,7 @@ func (s *stepStartVM) Run(ctx context.Context, state multistep.StateBag) multist
 		RNGDrive:       generateProxmoxRng0(c.Rng0),
 		TPM:            generateProxmoxTpm(c.TPMConfig),
 		QemuVga:        generateProxmoxVga(c.VGA),
-		QemuNetworks:   generateProxmoxNetworkAdapters(c.NICs),
+		Networks:       generateProxmoxNetworkAdapters(c.NICs),
 		Disks:          disks,
 		QemuPCIDevices: generateProxmoxPCIDeviceMap(c.PCIDevices),
 		Serials:        generateProxmoxSerials(c.Serials),
@@ -280,27 +281,59 @@ func generateTags(rawTags string) *[]proxmox.Tag {
 	return &tags
 }
 
-func generateProxmoxNetworkAdapters(nics []NICConfig) proxmox.QemuDevices {
-	devs := make(proxmox.QemuDevices)
+func generateProxmoxNetworkAdapters(nics []NICConfig) proxmox.QemuNetworkInterfaces {
+	networks := make(proxmox.QemuNetworkInterfaces)
 	for idx := range nics {
-		devs[idx] = make(proxmox.QemuDevice)
-		setDeviceParamIfDefined(devs[idx], "model", nics[idx].Model)
-		setDeviceParamIfDefined(devs[idx], "macaddr", nics[idx].MACAddress)
-		setDeviceParamIfDefined(devs[idx], "bridge", nics[idx].Bridge)
-		setDeviceParamIfDefined(devs[idx], "tag", nics[idx].VLANTag)
-
+		interfaceID := proxmox.QemuNetworkInterfaceID(idx)
+		
+		// Parse the model
+		model := proxmox.QemuNetworkModel(nics[idx].Model)
+		
+		// Create the network interface
+		netInterface := proxmox.QemuNetworkInterface{
+			Model: &model,
+		}
+		
+		// Set bridge if defined
+		if nics[idx].Bridge != "" {
+			netInterface.Bridge = &nics[idx].Bridge
+		}
+		
+		// Set MAC address if defined
+		if nics[idx].MACAddress != "" {
+			if mac, err := net.ParseMAC(nics[idx].MACAddress); err == nil {
+				netInterface.MAC = &mac
+			}
+		}
+		
+		// Set firewall if enabled
 		if nics[idx].Firewall {
-			devs[idx]["firewall"] = nics[idx].Firewall
+			netInterface.Firewall = &nics[idx].Firewall
 		}
-
-		if nics[idx].MTU > 0 {
-			devs[idx]["mtu"] = nics[idx].MTU
+		
+		// Set MTU if defined and model is VirtIO
+		if nics[idx].MTU > 0 && model == proxmox.QemuNetworkModelVirtIO {
+			mtu := proxmox.QemuMTU{Value: proxmox.MTU(nics[idx].MTU)}
+			netInterface.MTU = &mtu
 		}
+		
+		// Set packet queues if defined
 		if nics[idx].PacketQueues > 0 {
-			devs[idx]["queues"] = nics[idx].PacketQueues
+			queues := proxmox.QemuNetworkQueue(nics[idx].PacketQueues)
+			netInterface.MultiQueue = &queues
 		}
+		
+		// Set VLAN tag if defined
+		if nics[idx].VLANTag != "" {
+			if vlanTag, err := strconv.ParseUint(nics[idx].VLANTag, 10, 16); err == nil {
+				vlan := proxmox.Vlan(vlanTag)
+				netInterface.NativeVlan = &vlan
+			}
+		}
+		
+		networks[interfaceID] = netInterface
 	}
-	return devs
+	return networks
 }
 
 func generateProxmoxDisks(disks []diskConfig, isos []ISOsConfig, cloneSourceDisks []string) (*packersdk.MultiError, []string, *proxmox.QemuStorages) {
